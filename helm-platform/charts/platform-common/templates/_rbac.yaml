@@ -1,0 +1,39 @@
+{{- define "platform-common.serviceAccount" -}}
+{{- if dig "serviceAccount" "create" false .Values -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "platform-common.serviceAccountName" . }}
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+  {{- with (dig "serviceAccount" "annotations" (dict) .Values) }}
+  annotations: {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 4 }}
+  {{- end }}
+automountServiceAccountToken: {{ dig "serviceAccount" "automount" false .Values }}
+{{- end -}}
+{{- end -}}
+
+{{- define "platform-common.role" -}}
+{{- $rbac := .Values.rbac | default dict -}}
+{{- if and $rbac.create $rbac.rules -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "platform-common.fullname" . }}
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+rules: {{- toYaml $rbac.rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "platform-common.fullname" . }}
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "platform-common.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "platform-common.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end -}}
+{{- end -}}

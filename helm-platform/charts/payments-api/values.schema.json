@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "payments-api values",
+  "type": "object",
+  "required": ["image", "resources", "podSecurityContext"],
+  "additionalProperties": true,
+  "properties": {
+    "replicaCount": { "type": "integer", "minimum": 1, "maximum": 100 },
+    "workload": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["Deployment", "StatefulSet"] }
+      }
+    },
+    "image": {
+      "type": "object",
+      "required": ["repository"],
+      "properties": {
+        "registry":   { "type": "string" },
+        "repository": { "type": "string", "minLength": 1 },
+        "tag":        { "type": "string", "not": { "const": "latest" } },
+        "digest":     { "type": "string", "pattern": "^(sha256:[a-f0-9]{64})?$" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "podAntiAffinityPreset": { "type": "string", "enum": ["soft", "hard", "none"] },
+    "resources": {
+      "type": "object",
+      "required": ["requests", "limits"],
+      "properties": {
+        "requests": {
+          "type": "object",
+          "required": ["cpu", "memory"],
+          "properties": {
+            "cpu":    { "type": ["string", "number"] },
+            "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "required": ["memory"],
+          "properties": {
+            "memory": { "type": "string", "pattern": "^[0-9]+(Mi|Gi)$" }
+          }
+        }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "required": ["runAsNonRoot"],
+      "properties": {
+        "runAsNonRoot": { "const": true },
+        "runAsUser":    { "type": "integer", "minimum": 1000 }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled":     { "type": "boolean" },
+        "minReplicas": { "type": "integer", "minimum": 1 },
+        "maxReplicas": { "type": "integer", "minimum": 1 }
+      },
+      "if":   { "properties": { "enabled": { "const": true } } },
+      "then": { "required": ["minReplicas", "maxReplicas"] }
+    }
+  }
+}

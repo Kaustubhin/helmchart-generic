@@ -1,0 +1,5 @@
+{{- include "platform-common.service" . }}
+{{- if eq (dig "workload" "kind" "Deployment" .Values) "StatefulSet" }}
+---
+{{ include "platform-common.service.headless" . }}
+{{- end }}

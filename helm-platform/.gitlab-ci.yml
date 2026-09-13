@@ -1,0 +1,80 @@
+# Chart pipeline. Two independent version streams:
+#   appVersion -> comes from the image build (app repo)
+#   version    -> the chart's own SemVer, bumped by conventional commits
+stages: [validate, test, publish, release]
+
+variables:
+  HELM_EXPERIMENTAL_OCI: "1"
+  CHART_DIR: charts/payments-api
+  LIB_DIR: charts/platform-common
+  REGISTRY: $CI_REGISTRY/platform/charts
+
+default:
+  image: alpine/helm:3.16.3
+  before_script:
+    - helm registry login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - helm dependency update "$CHART_DIR"
+
+lint:
+  stage: validate
+  script:
+    - helm lint "$CHART_DIR" --strict
+    - helm lint "$CHART_DIR" --strict -f "$CHART_DIR/values-prod.yaml"
+    # values.schema.json is enforced on every template/install, so this catches typos
+    - helm template rel "$CHART_DIR" -f "$CHART_DIR/values-prod.yaml" > rendered-prod.yaml
+  artifacts:
+    paths: [rendered-prod.yaml]
+
+unit:
+  stage: test
+  script:
+    - helm plugin install https://github.com/helm-unittest/helm-unittest
+    - helm unittest "$CHART_DIR" "$LIB_DIR"
+
+manifest-policy:
+  stage: test
+  needs: [lint]
+  script:
+    - kubeconform -strict -summary rendered-prod.yaml
+    - conftest test rendered-prod.yaml -p policies/rego
+
+# Guards against accidental breaking changes to the library contract:
+# render every consumer chart against the NEW library and diff the output.
+contract-diff:
+  stage: test
+  rules:
+    - changes: [charts/platform-common/**/*]
+  script:
+    - ./hack/render-all-consumers.sh main    > /tmp/before.yaml
+    - ./hack/render-all-consumers.sh $CI_COMMIT_SHA > /tmp/after.yaml
+    - diff -u /tmp/before.yaml /tmp/after.yaml || echo "review the diff above before merging"
+
+# Branch builds: pre-release version, never consumed by prod
+publish:prerelease:
+  stage: publish
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+  script:
+    - BASE=$(helm show chart "$CHART_DIR" | awk '/^version:/ {print $2}')
+    # SemVer pre-release: 2.7.3-rc.<pipeline>.<sha>  (sorts BELOW 2.7.3)
+    - VER="${BASE}-rc.${CI_PIPELINE_IID}.$(echo $CI_COMMIT_SHORT_SHA)"
+    - helm package "$CHART_DIR" --version "$VER" --app-version "$APP_VERSION"
+    - helm push "payments-api-${VER}.tgz" "oci://$REGISTRY"
+
+# Default branch: immutable release, refuses to overwrite an existing version
+publish:release:
+  stage: release
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - VER=$(helm show chart "$CHART_DIR" | awk '/^version:/ {print $2}')
+    - |
+      if helm show chart "oci://$REGISTRY/payments-api" --version "$VER" >/dev/null 2>&1; then
+        echo "chart version $VER already published - bump Chart.yaml"; exit 1
+      fi
+    - helm package "$CHART_DIR" --version "$VER" --app-version "$APP_VERSION"
+    - helm push "payments-api-${VER}.tgz" "oci://$REGISTRY"
+    - cosign sign --yes "$REGISTRY/payments-api:$VER"
+    - syft "$REGISTRY/payments-api:$VER" -o spdx-json > sbom.json
+  artifacts:
+    paths: [sbom.json]

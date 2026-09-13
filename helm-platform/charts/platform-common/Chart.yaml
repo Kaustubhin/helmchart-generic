@@ -1,0 +1,8 @@
+apiVersion: v2
+name: platform-common
+description: Opinionated, secure-by-default library chart for platform workloads
+type: library                 # <- library charts render nothing on their own
+version: 1.4.0                # SemVer of the TEMPLATE CONTRACT, not of any app
+kubeVersion: ">=1.27.0-0"
+maintainers:
+  - name: Platform Engineering

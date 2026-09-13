@@ -1,0 +1,26 @@
+{{/* `helm test <release>` - a real smoke test, also usable as an Argo CD PostSync check. */}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "platform-common.fullname" . }}-test
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext: {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: curl
+      image: {{ dig "global" "imageRegistry" "" .Values }}/tools/curl:8.8.0
+      securityContext: {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+      args:
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "10"
+        - http://{{ include "platform-common.fullname" . }}/readyz
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {memory: 64Mi}

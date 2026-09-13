@@ -1,0 +1,151 @@
+{{/* ------------------------------------------------------------------
+     The main workload. Supports Deployment and StatefulSet from one
+     definition so a team can switch kind without changing chart layout.
+     Called as: {{ include "platform-common.workload" . }}
+     ------------------------------------------------------------------ */}}
+{{- define "platform-common.workload" -}}
+{{- include "platform-common.validate" . -}}
+{{- $kind := dig "workload" "kind" "Deployment" .Values -}}
+{{- $preset := .Values.podAntiAffinityPreset | default "soft" -}}
+{{- $isDeploy := eq $kind "Deployment" -}}
+apiVersion: apps/v1
+kind: {{ $kind }}
+metadata:
+  name: {{ include "platform-common.fullname" . }}
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+  {{- with (include "platform-common.annotations" .) }}
+  annotations: {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if not (dig "autoscaling" "enabled" false .Values) }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit | default 3 }}
+  selector:
+    matchLabels: {{- include "platform-common.selectorLabels" . | nindent 6 }}
+  {{- if $isDeploy }}
+  strategy:
+    {{- toYaml (.Values.updateStrategy | default (dict "type" "RollingUpdate" "rollingUpdate" (dict "maxSurge" "25%" "maxUnavailable" 0))) | nindent 4 }}
+  {{- else }}
+  serviceName: {{ include "platform-common.fullname" . }}-headless
+  podManagementPolicy: {{ dig "workload" "podManagementPolicy" "OrderedReady" .Values }}
+  updateStrategy:
+    {{- toYaml (.Values.updateStrategy | default (dict "type" "RollingUpdate")) | nindent 4 }}
+  {{- with .Values.volumeClaimTemplates }}
+  volumeClaimTemplates: {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "platform-common.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets | default (dig "global" "imagePullSecrets" (list) .Values) }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "platform-common.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.automountServiceAccountToken | default false }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.hostAliases }}
+      hostAliases: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 30 }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.initContainers }}
+      initContainers: {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "platform-common.name" . }}
+          image: {{ include "platform-common.image" . }}
+          imagePullPolicy: {{ dig "image" "pullPolicy" "IfNotPresent" .Values }}
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          {{- with .Values.command }}
+          command: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            {{- range .Values.containerPorts }}
+            - name: {{ .name }}
+              containerPort: {{ .containerPort }}
+              protocol: {{ .protocol | default "TCP" }}
+            {{- end }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- with .Values.env }}
+            {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 12 }}
+            {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom: {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 12 }}
+          {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.lifecycle }}
+          lifecycle: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.volumeMounts }}
+          volumeMounts: {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 12 }}
+          {{- end }}
+        {{- with .Values.sidecars }}
+        {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 8 }}
+        {{- end }}
+      {{- with .Values.volumes }}
+      volumes: {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.affinity }}
+      affinity: {{- include "platform-common.tpl" (dict "value" .Values.affinity "ctx" $) | nindent 8 }}
+      {{- else if ne $preset "none" }}
+      affinity:
+        podAntiAffinity:
+          {{- if eq $preset "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {{- include "platform-common.selectorLabels" . | nindent 18 }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {{- include "platform-common.selectorLabels" . | nindent 20 }}
+          {{- end }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints: {{- include "platform-common.tpl" (dict "value" . "ctx" $) | nindent 8 }}
+      {{- end }}
+{{- end -}}

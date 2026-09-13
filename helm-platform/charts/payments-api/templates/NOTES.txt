@@ -1,0 +1,8 @@
+{{ .Chart.Name }} {{ .Chart.Version }} (app {{ .Chart.AppVersion }}) released as {{ .Release.Name }} in {{ .Release.Namespace }}.
+
+Image:    {{ include "platform-common.image" . }}
+Replicas: {{ if .Values.autoscaling.enabled }}HPA {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }}{{ else }}{{ .Values.replicaCount }} (fixed){{ end }}
+{{ if .Values.ingress.enabled }}URL:      https://{{ tpl (first .Values.ingress.hosts).host $ }}{{ end }}
+
+Verify:   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+Rollback: helm rollback {{ .Release.Name }} -n {{ .Release.Namespace }}

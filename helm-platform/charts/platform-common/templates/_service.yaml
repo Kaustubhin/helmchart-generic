@@ -1,0 +1,53 @@
+{{- define "platform-common.service" -}}
+{{- $svc := .Values.service | default dict -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "platform-common.fullname" . }}
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+  {{- $ann := merge (dict) ($svc.annotations | default dict) (fromYaml (include "platform-common.annotations" .) | default dict) }}
+  {{- with $ann }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type | default "ClusterIP" }}
+  {{- if eq ($svc.type | default "ClusterIP") "LoadBalancer" }}
+  {{- with $svc.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  {{- with $svc.sessionAffinity }}
+  sessionAffinity: {{ . }}
+  {{- end }}
+  ports:
+    {{- range $svc.ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort | default .name }}
+      protocol: {{ .protocol | default "TCP" }}
+      {{- if and .nodePort (eq ($svc.type | default "ClusterIP") "NodePort") }}
+      nodePort: {{ .nodePort }}
+      {{- end }}
+    {{- end }}
+  selector: {{- include "platform-common.selectorLabels" . | nindent 4 }}
+{{- end -}}
+
+{{/* Headless service, required by StatefulSet workloads */}}
+{{- define "platform-common.service.headless" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "platform-common.fullname" . }}-headless
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    {{- range (.Values.service | default dict).ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort | default .name }}
+    {{- end }}
+  selector: {{- include "platform-common.selectorLabels" . | nindent 4 }}
+{{- end -}}

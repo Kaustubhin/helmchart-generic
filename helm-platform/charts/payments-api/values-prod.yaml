@@ -1,0 +1,80 @@
+# Only deltas from values.yaml. Keep environment files small and reviewable.
+replicaCount: 6
+
+policy:
+  requireHA: true
+
+image:
+  # CI rewrites this to the digest promoted out of staging
+  digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    memory: 4Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 6
+  maxReplicas: 40
+  targetCPUUtilizationPercentage: 60
+
+podAntiAffinityPreset: hard
+
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: payments-api
+        app.kubernetes.io/instance: "{{ .Release.Name }}"
+
+priorityClassName: business-critical
+
+ingress:
+  enabled: true
+  hosts:
+    - host: payments.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          portName: http
+  tls:
+    - hosts: [payments.example.com]
+      secretName: payments-tls
+
+env:
+  - name: LOG_LEVEL
+    value: warn
+
+config:
+  featureFlags:
+    asyncSettlement: true
+
+externalSecret:
+  remoteRefs:
+    - secretKey: DB_PASSWORD
+      key: payments/prod/db
+      property: password
+
+# NOTE: lists REPLACE on merge, maps merge key-by-key. `env` above wipes the
+# base list entirely - that is why env is kept short and the rest lives in the
+# ConfigMap.
+extraObjects:
+  - apiVersion: monitoring.coreos.com/v1
+    kind: ServiceMonitor
+    metadata:
+      name: "{{ .Release.Name }}-payments-api"
+      labels:
+        release: kube-prometheus-stack
+    spec:
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: payments-api
+          app.kubernetes.io/instance: "{{ .Release.Name }}"
+      endpoints:
+        - port: metrics
+          interval: 30s

@@ -1,0 +1,7 @@
+# A library chart's values.yaml is merged into the PARENT under the key
+# `platform-common:` - it is NOT the default for the parent's own .Values.
+# So never rely on it for defaults. Defaults belong in helpers (`| default`)
+# or in the consuming chart's values.yaml. This file exists only to document
+# the contract and to hold values used by the library's own unit tests.
+contract:
+  version: "1.4.0"

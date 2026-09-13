@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "platform-common.fullname" . }}-config
+  labels: {{- include "platform-common.labels" . | nindent 4 }}
+data:
+  application.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}
+  # .Files lets you keep large static config out of values.yaml
+  {{- range $path, $_ := .Files.Glob "files/*.properties" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}

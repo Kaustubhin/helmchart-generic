@@ -1,0 +1,206 @@
+# ---------------------------------------------------------------------------
+# Defaults = the safest useful configuration. Environments override, never
+# the other way round.
+# ---------------------------------------------------------------------------
+global:
+  imageRegistry: "registry.example.com"
+  allowedRegistries:
+    - registry.example.com
+    - registry.example.com/mirror
+  commonLabels:
+    app.kubernetes.io/part-of: payments-platform
+
+nameOverride: ""
+fullnameOverride: ""
+component: api
+partOf: payments-platform
+
+workload:
+  kind: Deployment
+
+image:
+  registry: ""          # falls back to global.imageRegistry
+  repository: payments/payments-api
+  tag: ""               # empty => .Chart.AppVersion. CI sets a digest in prod.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+replicaCount: 2
+revisionHistoryLimit: 5
+terminationGracePeriodSeconds: 45
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+policy:
+  requireProbes: true
+  requireHA: false      # flipped to true in values-prod.yaml
+
+serviceAccount:
+  create: true
+  name: ""
+  automount: false
+  annotations: {}
+automountServiceAccountToken: false
+
+rbac:
+  create: false
+  rules: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+containerPorts:
+  - name: http
+    containerPort: 8080
+  - name: metrics
+    containerPort: 9090
+
+service:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 2m
+  hosts:
+    - host: "{{ .Release.Name }}.apps.dev.example.com"   # rendered via tpl
+      paths:
+        - path: /
+          pathType: Prefix
+          portName: http
+  tls: []
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 1Gi          # no CPU limit on purpose - avoids throttling
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+podAntiAffinityPreset: soft    # soft | hard | none
+topologySpreadConstraints: []
+nodeSelector: {}
+tolerations: []
+priorityClassName: ""
+
+podLabels: {}
+podAnnotations: {}   # must exist as a map: CI/templates inject checksums here
+
+startupProbe:
+  httpGet: {path: /healthz, port: http}
+  failureThreshold: 30
+  periodSeconds: 5
+livenessProbe:
+  httpGet: {path: /healthz, port: http}
+  periodSeconds: 15
+  timeoutSeconds: 3
+readinessProbe:
+  httpGet: {path: /readyz, port: http}
+  periodSeconds: 5
+  timeoutSeconds: 2
+
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "sleep 10"]   # let the LB drain first
+
+env:
+  - name: LOG_LEVEL
+    value: info
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "http://otel-collector.observability:4317"
+
+envFrom:
+  - configMapRef:
+      name: "{{ .Release.Name }}-payments-api-config"
+  - secretRef:
+      name: "{{ .Release.Name }}-payments-api-secrets"
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: tmp
+    emptyDir: {}
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+config:
+  timeoutSeconds: 30
+  featureFlags:
+    asyncSettlement: false
+  upstreams:
+    ledger: "http://ledger.payments.svc.cluster.local:8080"
+
+externalSecret:
+  enabled: true
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  refreshInterval: 1h
+  remoteRefs:
+    - secretKey: DB_PASSWORD
+      key: payments/dev/db
+      property: password
+
+networkPolicy:
+  enabled: true
+  allowIngressFrom:
+    - namespaceSelector:
+        kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    - namespaceSelector:
+        kubernetes.io/metadata.name: observability
+      ports:
+        - protocol: TCP
+          port: 9090
+  allowEgressTo: []
+
+# Anything the library does not model natively goes here instead of a fork.
+extraObjects: []
+
+cache:
+  enabled: false

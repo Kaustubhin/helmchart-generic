@@ -1,0 +1,22 @@
+apiVersion: v2
+name: payments-api
+description: Payments API - example consumer of the platform-common library chart
+type: application
+version: 2.7.3          # chart (packaging) version - SemVer, immutable once pushed
+appVersion: "4.11.2"    # the app image version - quoted, not SemVer-constrained
+kubeVersion: ">=1.27.0-0"
+dependencies:
+  # Internal library: allow patch/minor pickup, lock file pins the exact build
+  - name: platform-common
+    version: "~1.4.0"
+    repository: "oci://registry.example.com/platform/charts"
+  # Third party: pin exactly, gate behind a condition
+  - name: redis
+    version: "19.6.4"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: cache.enabled
+    alias: cache
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Optional NetworkPolicy egress to the fraud-scoring service

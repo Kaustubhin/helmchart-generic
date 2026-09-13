@@ -1,0 +1,8 @@
+{{/*
+  The whole workload is one line. The checksum has to be computed HERE, not in
+  the library, because $.Template.BasePath resolves relative to the chart that
+  owns the file currently being rendered - inside a library `define` it would
+  point at charts/platform-common/templates.
+*/}}
+{{- $_ := set .Values.podAnnotations "checksum/config" (include (print $.Template.BasePath "/configmap.yaml") . | sha256sum) }}
+{{- include "platform-common.workload" . }}

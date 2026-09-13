@@ -1,0 +1,7 @@
+.git/
+.gitignore
+*.tgz
+tests/
+ci/
+*.bak
+.vscode/
